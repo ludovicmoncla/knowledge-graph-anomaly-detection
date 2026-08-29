@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bert-rgcn"
+version = "0.1.0"
+description = "Anomaly detection in temporal knowledge graphs with semantic and relational graph representations."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "LIRIS"}]
+dependencies = [
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "openai>=1.0",
+  "python-dotenv>=1.0",
+  "scikit-learn>=1.4",
+  "sentence-transformers>=3.0",
+  "torch>=2.2",
+  "torch-geometric>=2.5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+bert-rgcn-train = "bert_rgcn.cli:main"
+bert-rgcn-describe-data = "bert_rgcn.describe_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
