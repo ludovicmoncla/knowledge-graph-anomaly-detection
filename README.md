@@ -6,7 +6,7 @@ with a global R-GCN/TransE score.
 
 
 
-![Overview of the architecture and data flow](docs/images/pipeline-overview.jpg)
+![Overview of the architecture and data flow](docs/images/pipeline-overview.png)
 TODO: translate the figure into English
 
 **TODO: add references to the RGCN paper and the ICEWS18 dataset.**
