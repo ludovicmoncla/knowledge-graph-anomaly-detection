@@ -149,6 +149,9 @@ activemq-data/
 
 # Environments
 .env
+.DS_Store
+outputs/
+data/processed/
 .envrc
 .venv
 env/
@@ -216,3 +219,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated experiment outputs
+outputs/
+results/
