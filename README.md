@@ -4,8 +4,11 @@ Research code for detecting anomalous events in temporal knowledge graphs. The
 current model combines a semantic score computed from Sentence-BERT embeddings
 with a global R-GCN/TransE score.
 
-The methodology and code were proposed and developed by Antoine Salazar during his final-year
+The methodology and code were proposed and developed by **Antoine Salazar** during his final-year
 internship at LIRIS, under the supervision of [Ludovic Moncla](https://ludovicmoncla.github.io), [Yassir Lairgi](https://lairgiyassir.github.io), [Khalid Benabdeslem](http://kbenabde.free.fr/bk/index.php) and [Rémy Cazabet](https://cazabetremy.fr).
+
+
+## Overview
 
 ![Overview of the architecture and data flow](docs/images/pipeline-overview.png)
 
