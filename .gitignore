@@ -223,4 +223,5 @@ __marimo__/
 # Generated experiment outputs
 outputs/
 results/
-internship_work/
+internship-work/
+tests/
