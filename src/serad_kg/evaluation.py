@@ -7,7 +7,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import auc, precision_recall_curve, roc_curve
+from sklearn.metrics import (
+    auc,
+    f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_curve,
+)
 
 
 def roc_metrics(labels: np.ndarray, scores: np.ndarray) -> tuple[float, float]:
@@ -22,6 +29,42 @@ def anomaly_auprc(labels: np.ndarray, plausibility_scores: np.ndarray) -> float:
     anomaly_scores = -np.asarray(plausibility_scores)
     precision, recall, _ = precision_recall_curve(anomaly_labels, anomaly_scores)
     return float(auc(recall, precision))
+
+
+def anomaly_precision_recall_threshold(
+    labels: np.ndarray, plausibility_scores: np.ndarray
+) -> float:
+    """Select a plausibility threshold maximizing anomaly F1 on validation data."""
+    anomaly_labels = 1 - np.asarray(labels, dtype=np.int64)
+    anomaly_scores = -np.asarray(plausibility_scores)
+    precision, recall, thresholds = precision_recall_curve(anomaly_labels, anomaly_scores)
+    if not len(thresholds):
+        raise ValueError("Cannot select a precision-recall threshold without both classes")
+    denominator = precision[:-1] + recall[:-1]
+    f1 = np.divide(
+        2 * precision[:-1] * recall[:-1],
+        denominator,
+        out=np.zeros_like(denominator),
+        where=denominator > 0,
+    )
+    best_f1 = np.max(f1)
+    candidates = np.flatnonzero(np.isclose(f1, best_f1))
+    # When several thresholds yield the same F1, prefer the most precise one.
+    index = int(candidates[np.argmax(precision[candidates])])
+    return float(-thresholds[index])
+
+
+def anomaly_classification_metrics(
+    labels: np.ndarray, plausibility_scores: np.ndarray, threshold: float
+) -> dict[str, float]:
+    """Compute threshold-dependent metrics with anomalies as the positive class."""
+    anomaly_labels = 1 - np.asarray(labels, dtype=np.int64)
+    predicted_anomalies = np.asarray(plausibility_scores) <= threshold
+    return {
+        "precision": float(precision_score(anomaly_labels, predicted_anomalies, zero_division=0)),
+        "recall": float(recall_score(anomaly_labels, predicted_anomalies, zero_division=0)),
+        "f1": float(f1_score(anomaly_labels, predicted_anomalies, zero_division=0)),
+    }
 
 
 def save_loss_plot(train_losses: list[float], validation_losses: list[float], path: Path) -> None:

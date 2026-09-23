@@ -4,7 +4,14 @@ import argparse
 from pathlib import Path
 
 from .config import TrainingConfig
-from .pipeline import run, run_repeated
+from .pipeline import run, run_alpha_sweep, run_repeated
+
+
+def alpha_value(value: str) -> float:
+    alpha = float(value)
+    if not 0.0 <= alpha <= 1.0:
+        raise argparse.ArgumentTypeError("alpha must be between 0 and 1")
+    return alpha
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +48,19 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="Run multiple seeds and report mean, standard deviation, and 95%% CI",
     )
+    alpha_group = parser.add_mutually_exclusive_group()
+    alpha_group.add_argument(
+        "--alpha",
+        type=alpha_value,
+        default=0.5,
+        help="Weight of the local plausibility score (between 0 and 1)",
+    )
+    alpha_group.add_argument(
+        "--alphas",
+        type=alpha_value,
+        nargs="+",
+        help="Run the experiment for multiple local-score weights",
+    )
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or mps")
     return parser
 
@@ -60,9 +80,12 @@ def main() -> None:
         env_file=args.env_file,
         max_snapshots=args.max_snapshots or None,
         random_seed=args.seed,
+        plausibility_weight=args.alpha,
         device=args.device,
     )
-    if args.seeds is not None:
+    if args.alphas is not None:
+        run_alpha_sweep(config, args.alphas, args.seeds)
+    elif args.seeds is not None:
         run_repeated(config, args.seeds)
     else:
         run(config)

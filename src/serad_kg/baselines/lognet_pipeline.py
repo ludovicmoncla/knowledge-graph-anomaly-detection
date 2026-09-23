@@ -131,7 +131,9 @@ def run(config: LogNetConfig) -> pd.DataFrame:
     result.to_csv(config.output_dir / "summary.csv", index=False)
     print(
         f"Completed {protocol}: test AUROC={metrics['auc_test']:.4f}, "
-        f"AUPRC={metrics['auprc_test']:.4f} in {time.perf_counter() - started_at:.1f}s",
+        f"AUPRC={metrics['auprc_test']:.4f}, precision={metrics['precision_test']:.4f}, "
+        f"recall={metrics['recall_test']:.4f}, F1={metrics['f1_test']:.4f} "
+        f"in {time.perf_counter() - started_at:.1f}s",
         flush=True,
     )
     return result

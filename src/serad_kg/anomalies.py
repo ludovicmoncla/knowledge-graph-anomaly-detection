@@ -55,7 +55,7 @@ def parse_generated_anomalies(content: str, expected_count: int) -> list[tuple[s
     anomalies: list[tuple[str, str, str]] = []
     for index, item in enumerate(items):
         if not isinstance(item, dict):
-            raise ValueError(f"Generated anomaly {index} is not an object")
+            raise TypeError(f"Generated anomaly {index} is not an object")
         values = tuple(
             str(item.get(field, "")).strip() for field in ("subject", "relation", "object")
         )
@@ -68,15 +68,27 @@ def parse_generated_anomalies(content: str, expected_count: int) -> list[tuple[s
 
 
 def validate_generated_anomalies(
-    anomalies: list[tuple[str, str, str]], context_triples: list[tuple[str, str, str]]
+    anomalies: list[tuple[str, str, str]],
+    context_triples: list[tuple[str, str, str]],
+    *,
+    require_context_vocabulary: bool = False,
 ) -> None:
     context_set = set(context_triples)
     context_entities = {
         label for subject, _, object_ in context_triples for label in (subject, object_)
     }
+    context_relations = {relation for _, relation, _ in context_triples}
     for anomaly in anomalies:
-        subject, _, object_ = anomaly
-        if subject not in context_entities and object_ not in context_entities:
+        subject, relation, object_ = anomaly
+        if require_context_vocabulary and (
+            subject not in context_entities
+            or object_ not in context_entities
+            or relation not in context_relations
+        ):
+            raise ValueError("A generated anomaly uses a label outside the snapshot context")
+        if not require_context_vocabulary and (
+            subject not in context_entities and object_ not in context_entities
+        ):
             raise ValueError("A generated anomaly does not reuse an entity from the context")
         if anomaly in context_set:
             raise ValueError("OpenRouter reproduced a positive context triple")
@@ -89,6 +101,7 @@ def generate_anomalies_genai(
     api_key: str,
     model: str,
     seed: int,
+    require_context_vocabulary: bool = False,
 ) -> list[tuple[str, str, str]]:
     """Generate implausible geopolitical triples through OpenRouter."""
     from openai import OpenAI
@@ -98,10 +111,43 @@ def generate_anomalies_genai(
     if not context_triples:
         raise ValueError("At least one context triple is required")
 
-    context = [
-        {"subject": subject, "relation": relation, "object": object_}
-        for subject, relation, object_ in context_triples[:100]
-    ]
+    selected_context = context_triples[:100]
+    if require_context_vocabulary and len(context_triples) > 100:
+        rng = np.random.default_rng(seed)
+        indices = np.sort(rng.choice(len(context_triples), size=100, replace=False))
+        selected_context = [context_triples[int(index)] for index in indices]
+    context_entities = sorted(
+        {label for subject, _, object_ in selected_context for label in (subject, object_)}
+    )
+    context_relations = sorted({relation for _, relation, _ in selected_context})
+    entity_to_token = {label: f"E{index}" for index, label in enumerate(context_entities)}
+    relation_to_token = {label: f"R{index}" for index, label in enumerate(context_relations)}
+    token_to_entity = {token: label for label, token in entity_to_token.items()}
+    token_to_relation = {token: label for label, token in relation_to_token.items()}
+    if require_context_vocabulary:
+        context = [
+            {
+                "subject": entity_to_token[subject],
+                "subject_label": subject,
+                "relation": relation_to_token[relation],
+                "relation_label": relation,
+                "object": entity_to_token[object_],
+                "object_label": object_,
+            }
+            for subject, relation, object_ in selected_context
+        ]
+    else:
+        context = [
+            {"subject": subject, "relation": relation, "object": object_}
+            for subject, relation, object_ in selected_context
+        ]
+    subject_schema: dict[str, object] = {"type": "string"}
+    relation_schema: dict[str, object] = {"type": "string"}
+    object_schema: dict[str, object] = {"type": "string"}
+    if require_context_vocabulary:
+        subject_schema["enum"] = list(token_to_entity)
+        relation_schema["enum"] = list(token_to_relation)
+        object_schema["enum"] = list(token_to_entity)
     schema = {
         "name": "knowledge_graph_anomalies",
         "strict": True,
@@ -115,9 +161,9 @@ def generate_anomalies_genai(
                     "items": {
                         "type": "object",
                         "properties": {
-                            "subject": {"type": "string"},
-                            "relation": {"type": "string"},
-                            "object": {"type": "string"},
+                            "subject": subject_schema,
+                            "relation": relation_schema,
+                            "object": object_schema,
                         },
                         "required": ["subject", "relation", "object"],
                         "additionalProperties": False,
@@ -128,11 +174,16 @@ def generate_anomalies_genai(
             "additionalProperties": False,
         },
     }
+    vocabulary_instruction = (
+        "Return only the safe E<number> entity tokens and R<number> relation tokens supplied in "
+        "the context; the associated labels explain their meaning. "
+        if require_context_vocabulary
+        else "Each triple must reuse at least one subject or object appearing in the context. "
+    )
     prompt = (
         f"Generate exactly {count} distinct, deliberately implausible geopolitical knowledge-graph "
-        "triples. Each triple must reuse at least one subject or object appearing in the supplied "
-        "context. Events should be historically, geographically, or logically absurd. Use "
-        "concise English relation labels. Do not reproduce a context triple. Context: "
+        f"triples. {vocabulary_instruction}Events should be historically, geographically, or "
+        "logically absurd. Do not reproduce a context triple. Context: "
         + json.dumps(context, ensure_ascii=False)
     )
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
@@ -150,5 +201,18 @@ def generate_anomalies_genai(
     if not content:
         raise ValueError("OpenRouter returned an empty response")
     anomalies = parse_generated_anomalies(content, count)
-    validate_generated_anomalies(anomalies, context_triples)
+    if require_context_vocabulary:
+        anomalies = [
+            (
+                token_to_entity[subject],
+                token_to_relation[relation],
+                token_to_entity[object_],
+            )
+            for subject, relation, object_ in anomalies
+        ]
+    validate_generated_anomalies(
+        anomalies,
+        selected_context if require_context_vocabulary else context_triples,
+        require_context_vocabulary=require_context_vocabulary,
+    )
     return anomalies

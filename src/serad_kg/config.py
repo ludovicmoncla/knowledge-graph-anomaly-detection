@@ -31,6 +31,10 @@ class TrainingConfig:
     min_triples: int = 3
     device: str = "auto"
 
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.plausibility_weight <= 1.0:
+            raise ValueError("plausibility_weight must be between 0 and 1")
+
     def resolved_device(self) -> torch.device:
         if self.device != "auto":
             return torch.device(self.device)

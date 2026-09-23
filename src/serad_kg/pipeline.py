@@ -20,6 +20,8 @@ from .config import TrainingConfig
 from .data import PreparedSnapshot, Vocabulary, load_events, load_vocabulary, prepare_snapshot
 from .evaluation import (
     anomaly_auprc,
+    anomaly_classification_metrics,
+    anomaly_precision_recall_threshold,
     roc_metrics,
     save_loss_plot,
     save_precision_recall_plot,
@@ -33,6 +35,12 @@ REPEATED_METRICS = (
     "auprc_validation",
     "auc_test",
     "auprc_test",
+    "precision_validation",
+    "recall_validation",
+    "f1_validation",
+    "precision_test",
+    "recall_test",
+    "f1_test",
     "threshold_validation",
     "epochs",
 )
@@ -62,13 +70,19 @@ def encode_generated_anomalies(
     relation_embeddings: torch.Tensor,
     device: torch.device,
 ) -> tuple[np.ndarray, torch.Tensor, torch.Tensor]:
-    entity_labels = list(dict.fromkeys(
-        label for subject, _, object_ in anomalies for label in (subject, object_)
-        if label not in entities.text_to_id
-    ))
-    relation_labels = list(dict.fromkeys(
-        relation for _, relation, _ in anomalies if relation not in relations.text_to_id
-    ))
+    entity_labels = list(
+        dict.fromkeys(
+            label
+            for subject, _, object_ in anomalies
+            for label in (subject, object_)
+            if label not in entities.text_to_id
+        )
+    )
+    relation_labels = list(
+        dict.fromkeys(
+            relation for _, relation, _ in anomalies if relation not in relations.text_to_id
+        )
+    )
     if entity_labels:
         encoded = encoder.encode(entity_labels, convert_to_tensor=True, device=str(device))
         entity_embeddings = torch.cat([entity_embeddings, encoded], dim=0)
@@ -202,8 +216,13 @@ def evaluate_snapshot(
     validation_mask = prepared.validation_mask.cpu().numpy()
     validation_labels = prepared.labels[prepared.validation_mask].cpu().numpy()
     validation_scores = scores[prepared.validation_mask].cpu().numpy()
-    threshold, validation_auc = roc_metrics(validation_labels, validation_scores)
+    _, validation_auc = roc_metrics(validation_labels, validation_scores)
+    threshold = anomaly_precision_recall_threshold(validation_labels, validation_scores)
     validation_auprc = anomaly_auprc(validation_labels, validation_scores)
+    validation_classification = anomaly_classification_metrics(
+        validation_labels, validation_scores, threshold
+    )
+    test_classification = anomaly_classification_metrics(test_labels, test_scores, threshold)
     save_roc_plot(
         validation_labels,
         validation_scores,
@@ -219,7 +238,7 @@ def evaluate_snapshot(
     frame["split"] = np.select(
         [test_mask, validation_mask], ["test", "validation"], default="train"
     )
-    frame["predicted_anomaly"] = frame["score"] < threshold
+    frame["predicted_anomaly"] = frame["score"] <= threshold
     frame.to_csv(output_dir / "scores.csv", index=False)
     torch.save(model.state_dict(), output_dir / "model.pt")
     return {
@@ -227,6 +246,12 @@ def evaluate_snapshot(
         "auprc_validation": validation_auprc,
         "auc_test": test_auc,
         "auprc_test": test_auprc,
+        "precision_validation": validation_classification["precision"],
+        "recall_validation": validation_classification["recall"],
+        "f1_validation": validation_classification["f1"],
+        "precision_test": test_classification["precision"],
+        "recall_test": test_classification["recall"],
+        "f1_test": test_classification["f1"],
         "threshold_validation": threshold,
         "epochs": len(train_losses),
     }
@@ -416,6 +441,11 @@ def run(config: TrainingConfig) -> pd.DataFrame:
             f"  Test AUC: {metrics['auc_test']:.3f} | Test AUPRC: {metrics['auprc_test']:.3f}",
             flush=True,
         )
+        print(
+            f"  Test precision: {metrics['precision_test']:.3f} | "
+            f"recall: {metrics['recall_test']:.3f} | F1: {metrics['f1_test']:.3f}",
+            flush=True,
+        )
         print(f"  Saved to: {snapshot_output} ({elapsed:.1f} s)", flush=True)
 
     result = pd.DataFrame(summary)
@@ -476,7 +506,9 @@ def run_prepared(config: TrainingConfig) -> pd.DataFrame:
     summary.to_csv(config.output_dir / "summary.csv", index=False)
     print(
         f"Completed {protocol}: test AUROC={metrics['auc_test']:.4f}, "
-        f"AUPRC={metrics['auprc_test']:.4f} in {time.perf_counter() - run_started_at:.1f}s",
+        f"AUPRC={metrics['auprc_test']:.4f}, precision={metrics['precision_test']:.4f}, "
+        f"recall={metrics['recall_test']:.4f}, F1={metrics['f1_test']:.4f} "
+        f"in {time.perf_counter() - run_started_at:.1f}s",
         flush=True,
     )
     return summary
@@ -552,3 +584,67 @@ def run_repeated(config: TrainingConfig, seeds: list[int]) -> dict[str, pd.DataF
     print(f"  Per-snapshot aggregate: {root_output / 'summary_aggregate.csv'}", flush=True)
     print(f"  Overall aggregate: {root_output / 'overall_aggregate.csv'}", flush=True)
     return {"by_seed": by_seed, "by_snapshot": by_snapshot, "overall": overall}
+
+
+def _alpha_directory_name(alpha: float) -> str:
+    return f"alpha_{alpha:.12g}"
+
+
+def run_alpha_sweep(
+    config: TrainingConfig,
+    alphas: list[float],
+    seeds: list[int] | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Run SERAD-KG for several local/global score weights."""
+    unique_alphas = list(dict.fromkeys(alphas))
+    if len(unique_alphas) < 2:
+        raise ValueError("At least two distinct alpha values are required for an alpha sweep")
+    if any(not 0.0 <= alpha <= 1.0 for alpha in unique_alphas):
+        raise ValueError("Alpha values must be between 0 and 1")
+
+    root_output = config.output_dir
+    root_output.mkdir(parents=True, exist_ok=True)
+    all_results = []
+
+    for run_number, alpha in enumerate(unique_alphas, start=1):
+        print(
+            f"\nSERAD-KG alpha run {run_number}/{len(unique_alphas)} — alpha {alpha:g}",
+            flush=True,
+        )
+        alpha_config = replace(
+            config,
+            output_dir=root_output / _alpha_directory_name(alpha),
+            plausibility_weight=alpha,
+        )
+        if seeds is None:
+            alpha_result = run(alpha_config).copy()
+            alpha_result.insert(0, "seed", config.random_seed)
+        else:
+            alpha_result = run_repeated(alpha_config, seeds)["by_seed"].copy()
+        alpha_result.insert(0, "alpha", alpha)
+        all_results.append(alpha_result)
+
+    by_alpha = pd.concat(all_results, ignore_index=True)
+    summary_path = root_output / (
+        "summary_by_alpha.csv" if seeds is None else "summary_by_alpha_and_seed.csv"
+    )
+    by_alpha.to_csv(summary_path, index=False)
+    (root_output / "alphas.json").write_text(
+        json.dumps({"alphas": unique_alphas}, indent=2), encoding="utf-8"
+    )
+
+    results = {"by_alpha": by_alpha}
+    if seeds is not None:
+        completed = by_alpha[by_alpha["status"].eq("ok")].copy()
+        if completed.empty:
+            raise RuntimeError("No snapshot completed successfully in the alpha sweep")
+        per_seed = completed.groupby(["alpha", "seed"], as_index=False)[
+            list(REPEATED_METRICS)
+        ].mean()
+        aggregate = aggregate_repeated_metrics(per_seed, ["alpha"])
+        aggregate.to_csv(root_output / "alpha_aggregate.csv", index=False)
+        results["aggregate"] = aggregate
+
+    print("\nSERAD-KG alpha sweep completed", flush=True)
+    print(f"  Results: {summary_path}", flush=True)
+    return results
