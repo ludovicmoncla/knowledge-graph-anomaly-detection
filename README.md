@@ -1,8 +1,8 @@
-# BERT-RGCN Knowledge Graph Anomaly Detection
+# SERAD-KG
 
-Research code for detecting anomalous events in temporal knowledge graphs. The
-current model combines a semantic score computed from Sentence-BERT embeddings
-with a global R-GCN/TransE score.
+Research code for detecting anomalous events in knowledge graphs. The
+SERAD-KG model combines a semantic score computed from Sentence-Transformer
+embeddings with a global R-GCN/TransE score.
 
 The methodology and code were proposed and developed by **Antoine Salazar** during his final-year
 internship at LIRIS, under the supervision of [Ludovic Moncla](https://ludovicmoncla.github.io), [Yassir Lairgi](https://lairgiyassir.github.io), [Khalid Benabdeslem](http://kbenabde.free.fr/bk/index.php) and [Rémy Cazabet](https://cazabetremy.fr).
@@ -50,7 +50,7 @@ human-readable CSV files, relation frequencies, summary statistics, and a degree
 distribution figure:
 
 ```bash
-bert-rgcn-describe-data \
+serad-kg-describe-data \
   --data-dir data/icews18 \
   --output-dir data/processed/icews18
 ```
@@ -61,10 +61,71 @@ where the model name and compute device are recorded with each experiment.
 
 ## Run an experiment
 
+### Paper comparison protocol
+
+Data preparation is deliberately separate from model training. It creates one
+immutable `manifest.csv` containing numeric triples, labels, and train/validation/test
+assignments. SERAD-KG and LoGNet both verify and consume this exact file; its SHA-256
+checksum is copied into each run configuration.
+
+The primary experiment treats the first ten snapshots as one static graph. Positive
+triples are deduplicated before a stratified 60/20/20 split is created. Cached
+anomalies are pooled, deduplicated, and rejected if they match a positive in any of
+the selected snapshots:
+
 ```bash
-bert-rgcn-train \
+serad-kg-prepare \
   --data-dir data/icews18 \
-  --output-dir outputs/bert_rgcn \
+  --output-dir data/processed/icews18/experiments/pooled \
+  --protocol pooled \
+  --negative-sampling cache \
+  --anomaly-cache-dir data/processed/icews18/llm_anomalies
+```
+
+The complementary chronological experiment uses snapshots 0–6 for training,
+snapshot 7 for validation and snapshots 8–9 for testing. A repeated positive is
+assigned to its earliest snapshot, so it cannot leak into a later split:
+
+```bash
+serad-kg-prepare \
+  --data-dir data/icews18 \
+  --output-dir data/processed/icews18/experiments/chronological \
+  --protocol chronological \
+  --negative-sampling cache \
+  --anomaly-cache-dir data/processed/icews18/llm_anomalies
+```
+
+Train both models by pointing them at the same prepared directory:
+
+```bash
+serad-kg-train \
+  --data-dir data/icews18 \
+  --prepared-data-dir data/processed/icews18/experiments/pooled \
+  --output-dir outputs/pooled/serad_kg
+
+lognet-train \
+  --data-dir data/icews18 \
+  --prepared-data-dir data/processed/icews18/experiments/pooled \
+  --output-dir outputs/pooled/lognet
+```
+
+Repeat those two training commands with the `chronological` directory for the
+generalization experiment. Random corruption remains available by replacing
+`--negative-sampling cache` with `random`; `--anomalies-per-snapshot` controls its
+size. Split preparation always uses seed 42 unless `--seed` is supplied. Both
+training commands accept `--seeds 41 42 43 44 45` for repeated runs while keeping
+the prepared test set fixed.
+
+The packaged LoGNet baseline lives in `src/serad_kg/baselines/`. The scripts under
+`internship-work/` are retained only as historical research artifacts and are not
+part of the reproducible comparison workflow.
+
+### Legacy per-snapshot experiment
+
+```bash
+serad-kg-train \
+  --data-dir data/icews18 \
+  --output-dir outputs/serad_kg \
   --max-snapshots 10 \
   --epochs 150 \
   --seed 42
@@ -92,7 +153,7 @@ OPENROUTER_API_KEY=your-key
 Then run:
 
 ```bash
-bert-rgcn-train \
+serad-kg-train \
   --data-dir data/icews18 \
   --negative-sampling genai
 ```
@@ -104,11 +165,35 @@ Generated labels absent from ICEWS18 are encoded with
 the same Sentence-Transformer and added to the vocabulary. API outputs may vary
 even when `--seed` is fixed.
 
+### Reuse LoGNet anomalies for a fair comparison
+
+The internship LoGNet script stores its LLM-generated anomalies immediately under
+`data/processed/icews18/llm_anomalies/`, with one portable CSV file per chronological
+snapshot. Existing files are loaded automatically, so rerunning LoGNet does not make
+new paid API calls for those snapshots.
+
+The SERAD-KG pipeline can consume the exact same negative triples:
+
+```bash
+serad-kg-train \
+  --data-dir data/icews18 \
+  --output-dir outputs/serad_kg_shared_anomalies \
+  --negative-sampling cache \
+  --anomaly-cache-dir data/processed/icews18/llm_anomalies \
+  --max-snapshots 10
+```
+
+Cache files are matched by chronological snapshot index rather than raw timestamp.
+This is intentional: `train_icews18_lisible.csv` numbers days as `0, 1, 2, ...`,
+whereas `train.txt` represents the same days as `0, 24, 48, ...`. Cache loading
+validates IDs, labels, duplicates, and overlap with the positive snapshot before
+training starts.
+
 
 ### Training workflow
 
-`bert-rgcn-train` runs the complete experiment pipeline. It does not require running
-`bert-rgcn-describe-data` first. The current implementation reads `train.txt`; the
+`serad-kg-train` runs the complete experiment pipeline. It does not require running
+`serad-kg-describe-data` first. The current implementation reads `train.txt`; the
 official `valid.txt` and `test.txt` splits are not yet used by training.
 
 The following operations are performed once at startup:
@@ -124,15 +209,15 @@ The following operations are performed once at startup:
 Then, independently for every selected snapshot, the command:
 
 1. extracts its positive triples;
-2. generates `--anomaly-count` negative triples using the strategy selected by
-   `--negative-sampling`;
+2. obtains negative triples using the strategy selected by `--negative-sampling`;
 3. rejects generated negatives that are also positives in the current snapshot;
 4. splits positives and negatives into disjoint training, validation, and test
    subsets;
 5. builds the R-GCN graph using only positive training triples;
-6. trains a new BERT + R-GCN model, using validation loss for early stopping;
-7. selects an anomaly threshold from the test ROC curve and computes the test AUC;
-8. exports the checkpoint, individual scores, loss curve, and ROC curve.
+6. trains a new SERAD-KG model, using validation loss for early stopping;
+7. selects an anomaly threshold from validation data and computes test AUROC and AUPRC;
+8. exports the checkpoint, individual scores, loss curve, ROC curves, and
+   precision-recall curves.
 
 Consequently, processing ten snapshots currently trains ten independent models;
 the model is not carried forward from one timestamp to the next.
@@ -140,14 +225,17 @@ the model is not carried forward from one timestamp to the next.
 The generated files have the following layout:
 
 ```text
-outputs/bert_rgcn/
+outputs/serad_kg/
 ├── config.json
 ├── summary.csv
 ├── snapshot_0000/
 │   ├── model.pt
 │   ├── scores.csv
 │   ├── loss.png
-│   └── roc_test.png
+│   ├── roc_validation.png
+│   ├── roc_test.png
+│   ├── pr_validation.png
+│   └── pr_test.png
 └── snapshot_0001/
     └── ...
 ```
@@ -157,17 +245,35 @@ graph score, combined score, data split, and predicted anomaly label.
 
 During execution, the terminal reports dataset and device information, snapshot
 progress, training and validation losses every ten epochs, early stopping, test
-AUC, output paths, and total elapsed time.
+AUROC and AUPRC, output paths, and total elapsed time.
+
+### Repeated-seed evaluation
+
+Use `--seeds` to repeat the complete experiment with several random seeds:
+
+```bash
+serad-kg-train \
+  --data-dir data/icews18 \
+  --output-dir outputs/serad_kg_repeated \
+  --negative-sampling cache \
+  --anomaly-cache-dir data/processed/icews18/llm_anomalies \
+  --max-snapshots 10 \
+  --seeds 41 42 43 44 45
+```
+
+Each run is saved under `seed_<seed>/`. `summary_by_seed.csv` contains every raw
+result, `summary_aggregate.csv` reports per-snapshot means, sample standard
+deviations, and Student 95% confidence intervals, and `overall_aggregate.csv`
+summarizes the per-seed averages across snapshots. AUPRC treats anomalies as the
+positive class and uses the negative plausibility score as the anomaly score.
 
 ## Reproducibility note
 
 Each snapshot is split into disjoint training, validation, and test subsets. The
-graph is built from training positives only, early stopping uses validation loss,
-and the reported AUC is computed on the test subset. The current classification
-threshold is nevertheless selected from the test ROC curve; it must be selected
-from validation data instead before reporting classification results. The
-anomaly-generation protocol and repeated-seed evaluation should also be fixed in
-an experiment specification.
+graph is built from training positives only, early stopping and classification-threshold
+selection use validation data, and the reported final AUROC and AUPRC are computed
+on the test subset. For comparable repeated experiments, use the shared anomaly
+cache so that only initialization and data partitioning vary with the seed.
 
 
 ## License
