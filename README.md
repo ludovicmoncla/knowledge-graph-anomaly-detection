@@ -1,4 +1,4 @@
-# SERAD-KG
+# SERAD-KG - A Semantic and Relational Approach to Anomaly Detection in Knowledge Graphs
 
 Research code for detecting anomalous events in knowledge graphs. The
 SERAD-KG model combines a semantic score computed from Sentence-Transformer
