@@ -1,25 +1,70 @@
-# SERAD-KG - A Semantic and Relational Approach to Anomaly Detection in Knowledge Graphs
+# SERAD-KG
 
-Research code for detecting anomalous events in knowledge graphs. The
-SERAD-KG model combines a semantic score computed from Sentence-Transformer
-embeddings with a global R-GCN/TransE score.
+**Semantic and Relational Anomaly Detection in Knowledge Graphs**
 
-The methodology and code were proposed and developed by **Antoine Salazar** during his final-year
-internship at LIRIS, under the supervision of [Ludovic Moncla](https://ludovicmoncla.github.io), [Yassir Lairgi](https://lairgiyassir.github.io), [Khalid Benabdeslem](http://kbenabde.free.fr/bk/index.php) and [Rémy Cazabet](https://cazabetremy.fr).
+SERAD-KG detects anomalous events in temporal knowledge graphs by combining two
+complementary views of a triple:
 
+- a **local semantic branch**, built from Sentence-Transformer embeddings;
+- a **global relational branch**, based on an R-GCN encoder and a TransE score.
 
-## Overview
+The repository also contains a reproducible implementation of **LoGNet**, used as
+the baseline, as well as the complete data-preparation and repeated-evaluation
+workflow used for ICEWS18.
 
-![Overview of the architecture and data flow](docs/images/pipeline-overview.png)
+The methodology and code were developed by **Antoine Salazar** during his
+final-year internship at LIRIS, under the supervision of
+[Ludovic Moncla](https://ludovicmoncla.github.io),
+[Yassir Lairgi](https://lairgiyassir.github.io),
+[Khalid Benabdeslem](http://kbenabde.free.fr/bk/index.php), and
+[Rémy Cazabet](https://cazabetremy.fr).
 
-**TODO: translate the figure into English**
+![SERAD-KG architecture and experimental pipeline](docs/images/pipeline-overview.png)
 
-**TODO: add references to the RGCN paper and the ICEWS18 dataset.**
+## Main results
 
+The following results use LLM-generated anomalies, five initialization seeds
+(41–45), a 10% anomaly ratio in training, validation, and test, and `alpha = 0.5`
+for SERAD-KG. Values are the **mean ± sample standard deviation** across seeds.
+Anomalies are the positive class for AUPRC, precision, recall, and F1.
+
+| Protocol | Method | AUROC | AUPRC | Precision | Recall | F1 |
+|---|---|---:|---:|---:|---:|---:|
+| Pooled | LoGNet | 0.614 ± 0.020 | 0.143 ± 0.008 | 0.138 ± 0.012 | **0.492 ± 0.127** | 0.213 ± 0.013 |
+| Pooled | **SERAD-KG** | **0.786 ± 0.003** | **0.321 ± 0.011** | **0.308 ± 0.016** | 0.451 ± 0.055 | **0.364 ± 0.012** |
+| Chronological | LoGNet | 0.627 ± 0.021 | 0.150 ± 0.010 | 0.156 ± 0.022 | 0.412 ± 0.144 | 0.219 ± 0.010 |
+| Chronological | **SERAD-KG** | **0.811 ± 0.004** | **0.359 ± 0.009** | **0.357 ± 0.020** | **0.423 ± 0.036** | **0.386 ± 0.011** |
+
+SERAD-KG improves AUPRC by 0.178 in the pooled protocol and 0.209 in the
+chronological protocol at this training ratio. LoGNet has slightly higher pooled
+recall, but with substantially lower precision; threshold-independent AUROC and
+AUPRC therefore provide the more informative comparison.
+
+### Influence of the training anomaly ratio
+
+Validation and test remain fixed at 10% anomalies in this experiment. Only the
+training anomaly ratio changes. The table reports test AUPRC and F1.
+
+| Protocol | Method | Metric | 1% | 2.5% | 5% | 10% | 20% |
+|---|---|---|---:|---:|---:|---:|---:|
+| Pooled | LoGNet | AUPRC | 0.123 ± 0.006 | 0.127 ± 0.006 | **0.162 ± 0.011** | 0.143 ± 0.008 | 0.115 ± 0.005 |
+| Pooled | LoGNet | F1 | 0.191 ± 0.005 | 0.195 ± 0.005 | **0.244 ± 0.019** | 0.213 ± 0.013 | 0.184 ± 0.003 |
+| Pooled | SERAD-KG | AUPRC | 0.231 ± 0.005 | 0.257 ± 0.004 | 0.292 ± 0.005 | 0.321 ± 0.011 | **0.382 ± 0.015** |
+| Pooled | SERAD-KG | F1 | 0.300 ± 0.012 | 0.325 ± 0.007 | 0.345 ± 0.006 | 0.364 ± 0.012 | **0.405 ± 0.011** |
+| Chronological | LoGNet | AUPRC | 0.119 ± 0.005 | 0.121 ± 0.005 | **0.172 ± 0.016** | 0.150 ± 0.010 | 0.110 ± 0.007 |
+| Chronological | LoGNet | F1 | 0.179 ± 0.015 | 0.182 ± 0.014 | **0.244 ± 0.010** | 0.219 ± 0.010 | 0.180 ± 0.019 |
+| Chronological | SERAD-KG | AUPRC | 0.233 ± 0.009 | 0.262 ± 0.009 | 0.291 ± 0.010 | 0.359 ± 0.009 | **0.413 ± 0.016** |
+| Chronological | SERAD-KG | F1 | 0.291 ± 0.006 | 0.301 ± 0.012 | 0.332 ± 0.023 | 0.386 ± 0.011 | **0.435 ± 0.011** |
+
+SERAD-KG benefits consistently from additional labeled anomalies, whereas LoGNet
+peaks at 5% in both protocols. These are experimental observations, not a ratio
+selected independently on validation data. Detailed tables, plots, validation-based
+selection, and paired confidence intervals are available in
+[`notebooks/llm_ratio_results.ipynb`](notebooks/llm_ratio_results.ipynb).
 
 ## Installation
 
-Python 3.10 or newer is required. From the repository root:
+Python 3.10 or newer is required.
 
 ```bash
 python -m venv .venv
@@ -27,27 +72,31 @@ source .venv/bin/activate
 python -m pip install -e .
 ```
 
-For development and tests, install `-e '.[dev]'` instead.
+For tests and development tools:
+
+```bash
+python -m pip install -e '.[dev]'
+```
 
 ## Data
 
-The training command expects an ICEWS18 directory containing:
+The commands expect an ICEWS18 directory with the following files:
 
-- `entity2id.txt`: tab-separated entity label and integer ID;
-- `relation2id.txt`: tab-separated relation label and integer ID;
-- `train.txt`, `valid.txt`, and `test.txt`: subject ID, relation ID, object ID,
-  timestamp, and an optional fifth column.
+```text
+data/icews18/
+├── entity2id.txt
+├── relation2id.txt
+├── train.txt
+├── valid.txt
+└── test.txt
+```
 
-The ICEWS18 files currently available under `data/icews18/` follow this layout.
-Other serialized graph snapshots are stored separately under `data/snapshots/`.
-See `data/README.md` for details. Data licensing and the definitive distribution
-location (Git or Hugging Face) must be confirmed before the repository is published.
+The mapping files contain a label and an integer identifier separated by a tab.
+Each split contains subject, relation, object, and timestamp identifiers, plus an
+optional fifth column. See [`data/README.md`](data/README.md) for the detailed data
+layout and licensing notes.
 
-### Validate and describe the dataset
-
-The description command validates identifiers in every official split and creates
-human-readable CSV files, relation frequencies, summary statistics, and a degree
-distribution figure:
+To validate and summarize the dataset:
 
 ```bash
 serad-kg-describe-data \
@@ -55,395 +104,220 @@ serad-kg-describe-data \
   --output-dir data/processed/icews18
 ```
 
-The generated directory is ignored by Git because every artifact can be recreated
-from the raw files. Sentence embeddings are generated by the training pipeline,
-where the model name and compute device are recorded with each experiment.
+## Reproducing the LLM-anomaly experiments
 
-## Run an experiment
+### 1. Prepare shared manifests
 
-### Paper comparison protocol
+Preparation is deliberately separated from training. It creates immutable
+`manifest.csv` files consumed by both methods. Their SHA-256 checksums are copied
+to the run configurations so that SERAD-KG and LoGNet can be verified to use the
+same examples and splits.
 
-Data preparation is deliberately separate from model training. It creates one
-immutable `manifest.csv` containing numeric triples, labels, and train/validation/test
-assignments. SERAD-KG and LoGNet both verify and consume this exact file; its SHA-256
-checksum is copied into each run configuration.
-
-For both models, the anomaly threshold is selected exclusively on validation data
-by maximizing anomaly-class F1 on the precision-recall curve. Test precision,
-recall, F1, AUROC, and AUPRC are written to `summary.csv`; the per-example decision
-is written to `scores.csv`. No test label is used to select the threshold.
-
-The primary experiment treats the first ten snapshots as one static graph. Positive
-triples are deduplicated before a stratified 60/20/20 split is created. Cached
-anomalies are pooled, deduplicated, and rejected if they match a positive in any of
-the selected snapshots:
-
-```bash
-serad-kg-prepare \
-  --data-dir data/icews18 \
-  --output-dir data/processed/icews18/experiments/pooled \
-  --protocol pooled \
-  --negative-sampling cache \
-  --anomaly-cache-dir data/processed/icews18/llm_anomalies
-```
-
-The number of snapshots is configurable with `--num-snapshots` (`--max-snapshots`
-remains available as an alias). To compare training contamination ratios while
-keeping validation and test fixed, prepare a maximum 20% anomaly pool and derive
-nested training subsets from it:
-
-```bash
-serad-kg-prepare \
-  --data-dir data/icews18 \
-  --output-dir data/processed/icews18/experiments/pooled_30 \
-  --protocol pooled \
-  --negative-sampling random \
-  --num-snapshots 30 \
-  --max-anomaly-ratio 0.20 \
-  --evaluation-anomaly-ratio 0.10 \
-  --train-anomaly-ratios 0.01 0.025 0.05 0.10
-```
-
-Here, an anomaly ratio means `anomalies / (positives + anomalies)`. In the root
-manifest, training uses the maximum 20% ratio while validation and test use 10%.
-The four training manifests are written to
-`train_ratio_0.01/`, `train_ratio_0.025/`, `train_ratio_0.05/`, and
-`train_ratio_0.1/`. They share identical positive training examples and identical
-validation/test rows; only the nested set of training anomalies changes. Each
-variant can therefore be evaluated with five model-initialization seeds, for
-example:
-
-```bash
-serad-kg-train \
-  --data-dir data/icews18 \
-  --prepared-data-dir data/processed/icews18/experiments/pooled_30/train_ratio_0.01 \
-  --output-dir outputs/pooled_30/ratio_0.01/serad_kg \
-  --seeds 41 42 43 44 45
-
-lognet-train \
-  --data-dir data/icews18 \
-  --prepared-data-dir data/processed/icews18/experiments/pooled_30/train_ratio_0.01 \
-  --output-dir outputs/pooled_30/ratio_0.01/lognet \
-  --seeds 41 42 43 44 45
-```
-
-Replace `--negative-sampling random` with `genai` to force regeneration through
-OpenRouter instead of local corruption:
+The pooled experiment combines the first 30 snapshots, deduplicates triples, and
+then performs a stratified 60/20/20 split:
 
 ```bash
 serad-kg-prepare \
   --data-dir data/icews18 \
   --output-dir data/processed/icews18/experiments/pooled_30_llm \
   --protocol pooled \
-  --negative-sampling genai \
+  --negative-sampling cache \
   --anomaly-cache-dir data/processed/icews18/llm_anomalies_30 \
   --num-snapshots 30 \
   --max-anomaly-ratio 0.20 \
   --evaluation-anomaly-ratio 0.10 \
-  --train-anomaly-ratios 0.01 0.025 0.05 0.10 \
-  --openrouter-model openai/gpt-4.1 \
-  --genai-batch-size 50
+  --train-anomaly-ratios 0.01 0.025 0.05 0.10
 ```
 
-This mode requires `OPENROUTER_API_KEY` in `.env` (or the file passed through
-`--env-file`) and can make many paid calls at a 20% ratio. Every call receives
-positive triples from one snapshot only. Generated subjects, relations, and objects
-are constrained to labels present in that snapshot, rejected if they match any
-selected positive, and saved as reusable `snapshot_NNN.csv` cache files.
-
-If a paid generation run stops, rerun the exact same command with `--resume-genai`.
-The cache is checkpointed after every accepted batch. Existing `snapshot_NNN.csv`
-files are validated and reused, and OpenRouter is called only for the anomalies
-still missing from a snapshot. Without this flag, `genai` deliberately regenerates
-and overwrites the selected snapshot caches.
-
-With `--protocol chronological`, generated negatives retain their source snapshot:
-test anomalies therefore use only test-snapshot context. With `--protocol pooled`,
-all snapshots are pooled before random train/validation/test assignment, so there
-is no separate set of test snapshots; a test anomaly can originate from any of the
-selected snapshots.
-
-Existing LLM caches can be reused without another paid generation call. Use
-`--negative-sampling cache` with `llm_anomalies_30`; the resulting metadata records
-the cache directory and the prepared validation/test ratios.
-
-The complementary chronological experiment uses snapshots 0–6 for training,
-snapshot 7 for validation and snapshots 8–9 for testing. A repeated positive is
-assigned to its earliest snapshot, so it cannot leak into a later split:
+The chronological experiment uses snapshots 0–6 for training, snapshot 7 for
+validation, and snapshots 8–9 for testing:
 
 ```bash
 serad-kg-prepare \
   --data-dir data/icews18 \
-  --output-dir data/processed/icews18/experiments/chronological \
+  --output-dir data/processed/icews18/experiments/chronological_llm \
   --protocol chronological \
   --negative-sampling cache \
-  --anomaly-cache-dir data/processed/icews18/llm_anomalies
-```
-
-To evaluate the same training-contamination ratios as in `pooled_30`, prepare a
-maximum 20% chronological pool and its nested variants. Validation and test remain
-fixed at 10%; only the training anomalies vary:
-
-```bash
-serad-kg-prepare \
-  --data-dir data/icews18 \
-  --output-dir data/processed/icews18/experiments/chronological \
-  --protocol chronological \
-  --negative-sampling random \
+  --anomaly-cache-dir data/processed/icews18/llm_anomalies_30 \
   --num-snapshots 10 \
   --max-anomaly-ratio 0.20 \
   --evaluation-anomaly-ratio 0.10 \
   --train-anomaly-ratios 0.01 0.025 0.05 0.10
 ```
 
-This creates `train_ratio_0.01/`, `train_ratio_0.025/`, `train_ratio_0.05/`, and
-`train_ratio_0.1/`; the root `chronological/` manifest uses 20% for training and
-10% for validation/test. The same directory convention is used by `pooled_30`.
+An anomaly ratio is defined as `anomalies / (normal examples + anomalies)`. The
+root manifest uses 20% training anomalies. Nested `train_ratio_*` directories use
+1%, 2.5%, 5%, and 10%, while sharing the same normal training examples and the
+same validation and test sets.
 
-Train both models by pointing them at the same prepared directory:
-
-```bash
-serad-kg-train \
-  --data-dir data/icews18 \
-  --prepared-data-dir data/processed/icews18/experiments/pooled \
-  --output-dir outputs/pooled/serad_kg
-
-lognet-train \
-  --data-dir data/icews18 \
-  --prepared-data-dir data/processed/icews18/experiments/pooled \
-  --output-dir outputs/pooled/lognet
-```
-
-Repeat those two training commands with the `chronological` directory for the
-generalization experiment. Random corruption remains available by replacing
-`--negative-sampling cache` with `random`; `--anomalies-per-snapshot` controls its
-size. Split preparation always uses seed 42 unless `--seed` is supplied. Both
-training commands accept `--seeds 41 42 43 44 45` for repeated runs while keeping
-the prepared test set fixed.
-
-The packaged LoGNet baseline lives in `src/serad_kg/baselines/`. The scripts under
-`internship-work/` are retained only as historical research artifacts and are not
-part of the reproducible comparison workflow.
-
-### Legacy per-snapshot experiment
-
-```bash
-serad-kg-train \
-  --data-dir data/icews18 \
-  --output-dir outputs/serad_kg \
-  --max-snapshots 10 \
-  --epochs 150 \
-  --seed 42
-```
-
-By default, negative examples are generated deterministically by corrupting one
-component of sampled positive triples. Each snapshot produces a model checkpoint,
-scores, learning and ROC curves, while `summary.csv` gathers the main metrics.
-The exact configuration and resolved compute device are recorded in `config.json`.
-
-### GenAI negative sampling with OpenRouter
-
-Random corruption is the default and does not use an external service. To generate
-semantically implausible geopolitical triples with OpenRouter, copy the environment
-template and add your key:
-
-```bash
-cp .env.example .env
-```
-
-```dotenv
-OPENROUTER_API_KEY=your-key
-```
-
-Then run:
-
-```bash
-serad-kg-train \
-  --data-dir data/icews18 \
-  --negative-sampling genai
-```
-
-The default OpenRouter model is `openai/gpt-4.1`. It can be changed with
-`--openrouter-model`; use `--env-file` if the environment file is not `.env` in
-the repository root. GenAI mode makes one paid API request per snapshot. 
-Generated labels absent from ICEWS18 are encoded with
-the same Sentence-Transformer and added to the vocabulary. API outputs may vary
-even when `--seed` is fixed.
-
-### Reuse LoGNet anomalies for a fair comparison
-
-The internship LoGNet script stores its LLM-generated anomalies immediately under
-`data/processed/icews18/llm_anomalies/`, with one portable CSV file per chronological
-snapshot. Existing files are loaded automatically, so rerunning LoGNet does not make
-new paid API calls for those snapshots.
-
-The SERAD-KG pipeline can consume the exact same negative triples:
-
-```bash
-serad-kg-train \
-  --data-dir data/icews18 \
-  --output-dir outputs/serad_kg_shared_anomalies \
-  --negative-sampling cache \
-  --anomaly-cache-dir data/processed/icews18/llm_anomalies \
-  --max-snapshots 10
-```
-
-Cache files are matched by chronological snapshot index rather than raw timestamp.
-This is intentional: `train_icews18_lisible.csv` numbers days as `0, 1, 2, ...`,
-whereas `train.txt` represents the same days as `0, 24, 48, ...`. Cache loading
-validates IDs, labels, duplicates, and overlap with the positive snapshot before
-training starts.
-
-
-### Training workflow
-
-`serad-kg-train` runs the complete experiment pipeline. It does not require running
-`serad-kg-describe-data` first. The current implementation reads `train.txt`; the
-official `valid.txt` and `test.txt` splits are not yet used by training.
-
-The following operations are performed once at startup:
-
-1. Load `entity2id.txt`, `relation2id.txt`, and `train.txt`.
-2. Select the compute device and initialize all random-number generators from
-   `--seed`.
-3. Load the configured Sentence-Transformer model.
-4. Encode every entity and relation label into a semantic embedding.
-5. Group the training events by timestamp and select the snapshots requested by
-   `--max-snapshots`.
-
-Then, independently for every selected snapshot, the command:
-
-1. extracts its positive triples;
-2. obtains negative triples using the strategy selected by `--negative-sampling`;
-3. rejects generated negatives that are also positives in the current snapshot;
-4. splits positives and negatives into disjoint training, validation, and test
-   subsets;
-5. builds the R-GCN graph using only positive training triples;
-6. optionally masks positive graph edges during ablation experiments; the default
-   training configuration uses all positive training edges and examples;
-7. reduces the learning rate when validation AUPRC plateaus and uses validation
-   AUPRC for checkpoint selection and early stopping;
-8. selects an anomaly threshold from validation data and computes test AUROC and AUPRC;
-9. exports individual scores, the per-epoch training history, loss curve, ROC curves,
-   precision-recall curves,
-   and, unless `--no-save-model` is used, the model checkpoint.
-
-Consequently, processing ten snapshots currently trains ten independent models;
-the model is not carried forward from one timestamp to the next.
-
-The generated files have the following layout:
+To regenerate anomalies through OpenRouter instead of using the cache, replace
+`cache` with `genai` and add:
 
 ```text
-outputs/serad_kg/
-├── config.json
-├── summary.csv
-├── snapshot_0000/
-│   ├── model.pt                 # omitted with --no-save-model
-│   ├── scores.csv
-│   ├── training_history.csv
-│   ├── loss.png
-│   ├── roc_validation.png
-│   ├── roc_test.png
-│   ├── pr_validation.png
-│   └── pr_test.png
-└── snapshot_0001/
-    └── ...
+--openrouter-model openai/gpt-4.1 --genai-batch-size 50
 ```
 
-In `scores.csv`, every triple is associated with its local semantic score, global
-graph score, combined score, data split, and predicted anomaly label.
+Set `OPENROUTER_API_KEY` in `.env`. Generation can incur API costs. If it is
+interrupted, rerun the same command with `--resume-genai`; accepted batches are
+checkpointed and reused.
 
-The experiment scripts use `--no-save-model` to avoid accumulating checkpoints
-during parameter searches. Scores, metrics, plots, configurations, and execution
-times are still retained. Direct training commands save `model.pt` by default;
-pass `--no-save-model` to disable it.
+### 2. Run the repeated experiments
 
-During execution, the terminal reports dataset and device information, snapshot
-progress, training and validation losses, validation AUPRC for the local, global,
-and combined scores, the current learning rate, early stopping, test AUROC and
-AUPRC, output paths, and total elapsed time. `training_history.csv` retains those
-branch-specific losses, AUROC/AUPRC values, learning rates, and masked-edge counts
-for every epoch.
+The reproducible CPU scripts use seeds 41–45, 300 maximum epochs, patience 25,
+dynamic score normalization, no edge masking, no ranking loss, and no model
+checkpoints. Metrics, per-example scores, histories, plots, configurations, and
+execution times are retained.
 
-### Repeated-seed evaluation
+```bash
+# SERAD-KG, alpha = 0.5, training ratios 1%, 2.5%, 5%, and 20%
+./scripts/run_serad_kg_llm_ratios_cpu.sh
 
-Use `--seeds` to repeat the complete experiment with several random seeds:
+# LoGNet, training ratios 1%, 2.5%, 5%, and 20%
+./scripts/run_lognet_llm_ratios_cpu.sh
+```
+
+The 10% runs are separate because they were also used for the alpha study:
+
+```bash
+# SERAD-KG, alpha values 0.5, 0.75, 0.85, 0.95, and 1.0
+./scripts/run_serad_kg_llm_cpu.sh
+
+# LoGNet
+./scripts/run_lognet_llm_cpu.sh
+```
+
+The ratio-sweep scripts support resumption: completed seeds are skipped with
+`--resume`. On macOS, `caffeinate -i` can keep the machine awake during a long run:
+
+```bash
+caffeinate -i ./scripts/run_serad_kg_llm_ratios_cpu.sh
+```
+
+## Running one configuration
+
+SERAD-KG example:
 
 ```bash
 serad-kg-train \
   --data-dir data/icews18 \
-  --output-dir outputs/serad_kg_repeated \
-  --negative-sampling cache \
-  --anomaly-cache-dir data/processed/icews18/llm_anomalies \
-  --max-snapshots 10 \
+  --prepared-data-dir data/processed/icews18/experiments/pooled_30_llm/train_ratio_0.1 \
+  --output-dir outputs/example/serad_kg \
+  --alpha 0.5 \
+  --epochs 300 \
+  --patience 25 \
+  --score-normalization dynamic \
+  --edge-mask-ratio 0 \
+  --ranking-loss-weight 0 \
+  --device cpu \
+  --no-save-model \
   --seeds 41 42 43 44 45
 ```
 
-Each run is saved under `seed_<seed>/`. `summary_by_seed.csv` contains every raw
-result, `summary_aggregate.csv` reports per-snapshot means, sample standard
-deviations, and Student 95% confidence intervals, and `overall_aggregate.csv`
-summarizes the per-seed averages across snapshots. `elapsed_seconds` records the
-complete wall-clock duration of each run and is aggregated like the evaluation
-metrics. AUPRC treats anomalies as the positive class and uses the negative
-plausibility score as the anomaly score.
-
-## Reproducibility note
-
-Each snapshot is split into disjoint training, validation, and test subsets. The
-graph is built from training positives only, early stopping and classification-threshold
-selection use validation data, and the reported final AUROC and AUPRC are computed
-on the test subset. For comparable repeated experiments, use the shared anomaly
-cache so that only initialization and data partitioning vary with the seed.
-
-### Alpha sweep
-
-`alpha` controls the balance between the local semantic score and the global graph
-score. Use `--alpha` for one value, or `--alphas` for several values between 0 and 1:
+LoGNet example using the exact same prepared data:
 
 ```bash
-serad-kg-train \
-  --data-dir data/ICEWS18 \
-  --output-dir outputs/serad_kg_alpha \
-  --alphas 0 0.25 0.5 0.75 1
+lognet-train \
+  --data-dir data/icews18 \
+  --prepared-data-dir data/processed/icews18/experiments/pooled_30_llm/train_ratio_0.1 \
+  --output-dir outputs/example/lognet \
+  --epochs 300 \
+  --patience 25 \
+  --device cpu \
+  --no-save-model \
+  --seeds 41 42 43 44 45
 ```
 
-The runs are saved under `alpha_<value>/`, with a combined
-`summary_by_alpha.csv`. `--alphas` can be combined with `--seeds`; in that case,
-every alpha/seed combination is run and `alpha_aggregate.csv` reports the
-per-alpha seed aggregates.
+Pass `--resume` to preserve completed seeds when restarting a repeated run.
 
-Both branches produce calibrated logits. Their raw scores are standardized with
-statistics computed exclusively from the training split, then transformed with
-independent learned positive scales and biases. The default `dynamic` normalization
-refreshes these statistics from the current training forward pass; validation
-statistics are computed without dropout. The global TransE distance is also
-normalized by its embedding dimension. Training uses
-class-balanced BCE for the combined score plus branch-specific auxiliary losses
-(weight `0.25` per branch by
-default), so both branches remain discriminative and comparably scaled even at
-`alpha=0` or `alpha=1`. Consequently, `alpha` retains a direct interpretation: `1`
-uses only the local semantic logit, `0` only the global relational logit, and
-intermediate values combine them. Use `--auxiliary-loss-weight` to change the
-auxiliary weight. A differentiable pairwise ranking loss additionally encourages
-normal triples to exceed anomaly plausibility scores by a margin of `0.5`; its
-default weight is `0`, so it is available for ablations through
-`--ranking-loss-weight` and `--ranking-margin` but disabled in the main experiments.
-Weight decay defaults to `1e-4` and is not applied to biases or calibration
-parameters. Edge masking is likewise disabled by default (`--edge-mask-ratio 0`).
-When enabled, hidden positives and all training anomalies enter the balanced and
-ranking losses. A `ReduceLROnPlateau` scheduler halves the learning rate after eight
-epochs without validation-AUPRC improvement, down to `1e-6`.
-Early stopping selects the state with the best combined validation AUPRC and ignores
-improvements smaller than `1e-5`; these settings are configurable with
-`--scheduler-patience`, `--scheduler-factor`, `--min-learning-rate`, and
-`--min-delta`.
+## Model and training
 
-The alternative `--score-normalization stable` mode computes dropout-free training
-statistics before every optimization step. Validation statistics remain based only
-on training examples in both normalization modes.
+For a local plausibility logit `s_local` and a global relational logit `s_global`,
+the combined representation is controlled by `alpha`:
 
+```text
+combined = alpha × calibrated(s_local) + (1 - alpha) × calibrated(s_global)
+```
+
+Thus `alpha = 1` uses only the semantic branch, `alpha = 0` only the relational
+branch, and intermediate values combine both. Each branch is standardized using
+training-only statistics and receives a learned positive scale and bias.
+
+The main SERAD-KG configuration uses:
+
+- class-balanced BCE on the combined score;
+- an auxiliary BCE loss on each branch (weight 0.25);
+- dimension-normalized TransE distances;
+- validation AUPRC for learning-rate scheduling, checkpoint selection, and early
+  stopping;
+- a classification threshold selected exclusively on validation data by maximizing
+  anomaly-class F1.
+
+A differentiable pairwise ranking loss and positive-edge masking are implemented
+for ablations but disabled in the reported experiments. They can be enabled with
+`--ranking-loss-weight`, `--ranking-margin`, and `--edge-mask-ratio`.
+
+## Evaluation and outputs
+
+No test label is used for optimization, early stopping, or threshold selection.
+Final precision, recall, F1, AUROC, and AUPRC are computed once on the test set.
+AUROC and AUPRC use the continuous anomaly score and do not depend on the selected
+classification threshold.
+
+A repeated run produces:
+
+```text
+outputs/<experiment>/
+├── seed_41/
+│   ├── config.json
+│   ├── summary.csv
+│   ├── scores.csv
+│   └── training_history.csv
+├── seed_42/
+│   └── ...
+├── summary_by_seed.csv
+├── summary_aggregate.csv
+└── overall_aggregate.csv
+```
+
+Depending on the protocol, plots and snapshot-specific subdirectories can also be
+created. `model.pt` is written unless `--no-save-model` is supplied. The experiment
+scripts disable checkpoint storage to limit disk usage while preserving all scores
+and timings (`elapsed_seconds`).
+
+## Reproducibility notes
+
+- Use the same prepared-data directory for both methods.
+- Compare runs on the same device; CPU was used for the reported tables.
+- Keep all five seeds for final comparisons. A single seed is suitable only for
+  preliminary debugging.
+- Pooled and chronological results answer different questions and should not be
+  merged: pooled measures performance on a random split, while chronological
+  measures generalization to future snapshots.
+- LoGNet and SERAD-KG retain their method-specific optimization procedures. The
+  current comparison therefore evaluates the complete methods, not only their
+  architectures.
+
+## Tests
+
+```bash
+pytest
+```
+
+## References
+
+- Michael Schlichtkrull et al., [*Modeling Relational Data with Graph Convolutional
+  Networks*](https://arxiv.org/abs/1703.06103), ESWC 2018.
+- Antoine Bordes et al., [*Translating Embeddings for Modeling Multi-relational
+  Data*](https://proceedings.neurips.cc/paper/2013/hash/1cecc7a77928ca8133fa24680a88d2f9-Abstract.html),
+  NeurIPS 2013.
+- Alberto García-Durán, Sebastijan Dumančić, and Mathias Niepert,
+  [*Learning Sequence Encoders for Temporal Knowledge Graph
+  Completion*](https://aclanthology.org/D18-1516/), EMNLP 2018.
+- Nils Reimers and Iryna Gurevych,
+  [*Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks*](https://aclanthology.org/D19-1410/),
+  EMNLP-IJCNLP 2019.
 
 ## License
 
-The source code is distributed under the terms in [LICENSE](LICENSE). Dataset and
-pretrained-model licenses apply independently.
+The source code is distributed under the terms of [`LICENSE`](LICENSE). Dataset,
+LLM-generated data, and pretrained-model licenses apply independently.
