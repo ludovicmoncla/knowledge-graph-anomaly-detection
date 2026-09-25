@@ -100,11 +100,13 @@ serad-kg-prepare \
   --negative-sampling random \
   --num-snapshots 30 \
   --max-anomaly-ratio 0.20 \
+  --evaluation-anomaly-ratio 0.10 \
   --train-anomaly-ratios 0.01 0.025 0.05 0.10
 ```
 
-Here, an anomaly ratio means `anomalies / (positives + anomalies)`. The root
-manifest contains the 20% pool. The four training manifests are written to
+Here, an anomaly ratio means `anomalies / (positives + anomalies)`. In the root
+manifest, training uses the maximum 20% ratio while validation and test use 10%.
+The four training manifests are written to
 `train_ratio_0.01/`, `train_ratio_0.025/`, `train_ratio_0.05/`, and
 `train_ratio_0.1/`. They share identical positive training examples and identical
 validation/test rows; only the nested set of training anomalies changes. Each
@@ -137,6 +139,7 @@ serad-kg-prepare \
   --anomaly-cache-dir data/processed/icews18/llm_anomalies_30 \
   --num-snapshots 30 \
   --max-anomaly-ratio 0.20 \
+  --evaluation-anomaly-ratio 0.10 \
   --train-anomaly-ratios 0.01 0.025 0.05 0.10 \
   --openrouter-model openai/gpt-4.1 \
   --genai-batch-size 50
@@ -160,6 +163,10 @@ all snapshots are pooled before random train/validation/test assignment, so ther
 is no separate set of test snapshots; a test anomaly can originate from any of the
 selected snapshots.
 
+Existing LLM caches can be reused without another paid generation call. Use
+`--negative-sampling cache` with `llm_anomalies_30`; the resulting metadata records
+the cache directory and the prepared validation/test ratios.
+
 The complementary chronological experiment uses snapshots 0–6 for training,
 snapshot 7 for validation and snapshots 8–9 for testing. A repeated positive is
 assigned to its earliest snapshot, so it cannot leak into a later split:
@@ -172,6 +179,26 @@ serad-kg-prepare \
   --negative-sampling cache \
   --anomaly-cache-dir data/processed/icews18/llm_anomalies
 ```
+
+To evaluate the same training-contamination ratios as in `pooled_30`, prepare a
+maximum 20% chronological pool and its nested variants. Validation and test remain
+fixed at 10%; only the training anomalies vary:
+
+```bash
+serad-kg-prepare \
+  --data-dir data/icews18 \
+  --output-dir data/processed/icews18/experiments/chronological \
+  --protocol chronological \
+  --negative-sampling random \
+  --num-snapshots 10 \
+  --max-anomaly-ratio 0.20 \
+  --evaluation-anomaly-ratio 0.10 \
+  --train-anomaly-ratios 0.01 0.025 0.05 0.10
+```
+
+This creates `train_ratio_0.01/`, `train_ratio_0.025/`, `train_ratio_0.05/`, and
+`train_ratio_0.1/`; the root `chronological/` manifest uses 20% for training and
+10% for validation/test. The same directory convention is used by `pooled_30`.
 
 Train both models by pointing them at the same prepared directory:
 
@@ -292,10 +319,14 @@ Then, independently for every selected snapshot, the command:
 4. splits positives and negatives into disjoint training, validation, and test
    subsets;
 5. builds the R-GCN graph using only positive training triples;
-6. trains a new SERAD-KG model, using validation loss for early stopping;
-7. selects an anomaly threshold from validation data and computes test AUROC and AUPRC;
-8. exports the checkpoint, individual scores, loss curve, ROC curves, and
-   precision-recall curves.
+6. optionally masks positive graph edges during ablation experiments; the default
+   training configuration uses all positive training edges and examples;
+7. reduces the learning rate when validation AUPRC plateaus and uses validation
+   AUPRC for checkpoint selection and early stopping;
+8. selects an anomaly threshold from validation data and computes test AUROC and AUPRC;
+9. exports individual scores, the per-epoch training history, loss curve, ROC curves,
+   precision-recall curves,
+   and, unless `--no-save-model` is used, the model checkpoint.
 
 Consequently, processing ten snapshots currently trains ten independent models;
 the model is not carried forward from one timestamp to the next.
@@ -307,8 +338,9 @@ outputs/serad_kg/
 ├── config.json
 ├── summary.csv
 ├── snapshot_0000/
-│   ├── model.pt
+│   ├── model.pt                 # omitted with --no-save-model
 │   ├── scores.csv
+│   ├── training_history.csv
 │   ├── loss.png
 │   ├── roc_validation.png
 │   ├── roc_test.png
@@ -321,9 +353,17 @@ outputs/serad_kg/
 In `scores.csv`, every triple is associated with its local semantic score, global
 graph score, combined score, data split, and predicted anomaly label.
 
+The experiment scripts use `--no-save-model` to avoid accumulating checkpoints
+during parameter searches. Scores, metrics, plots, configurations, and execution
+times are still retained. Direct training commands save `model.pt` by default;
+pass `--no-save-model` to disable it.
+
 During execution, the terminal reports dataset and device information, snapshot
-progress, training and validation losses every ten epochs, early stopping, test
-AUROC and AUPRC, output paths, and total elapsed time.
+progress, training and validation losses, validation AUPRC for the local, global,
+and combined scores, the current learning rate, early stopping, test AUROC and
+AUPRC, output paths, and total elapsed time. `training_history.csv` retains those
+branch-specific losses, AUROC/AUPRC values, learning rates, and masked-edge counts
+for every epoch.
 
 ### Repeated-seed evaluation
 
@@ -342,8 +382,10 @@ serad-kg-train \
 Each run is saved under `seed_<seed>/`. `summary_by_seed.csv` contains every raw
 result, `summary_aggregate.csv` reports per-snapshot means, sample standard
 deviations, and Student 95% confidence intervals, and `overall_aggregate.csv`
-summarizes the per-seed averages across snapshots. AUPRC treats anomalies as the
-positive class and uses the negative plausibility score as the anomaly score.
+summarizes the per-seed averages across snapshots. `elapsed_seconds` records the
+complete wall-clock duration of each run and is aggregated like the evaluation
+metrics. AUPRC treats anomalies as the positive class and uses the negative
+plausibility score as the anomaly score.
 
 ## Reproducibility note
 
@@ -369,6 +411,36 @@ The runs are saved under `alpha_<value>/`, with a combined
 `summary_by_alpha.csv`. `--alphas` can be combined with `--seeds`; in that case,
 every alpha/seed combination is run and `alpha_aggregate.csv` reports the
 per-alpha seed aggregates.
+
+Both branches produce calibrated logits. Their raw scores are standardized with
+statistics computed exclusively from the training split, then transformed with
+independent learned positive scales and biases. The default `dynamic` normalization
+refreshes these statistics from the current training forward pass; validation
+statistics are computed without dropout. The global TransE distance is also
+normalized by its embedding dimension. Training uses
+class-balanced BCE for the combined score plus branch-specific auxiliary losses
+(weight `0.25` per branch by
+default), so both branches remain discriminative and comparably scaled even at
+`alpha=0` or `alpha=1`. Consequently, `alpha` retains a direct interpretation: `1`
+uses only the local semantic logit, `0` only the global relational logit, and
+intermediate values combine them. Use `--auxiliary-loss-weight` to change the
+auxiliary weight. A differentiable pairwise ranking loss additionally encourages
+normal triples to exceed anomaly plausibility scores by a margin of `0.5`; its
+default weight is `0`, so it is available for ablations through
+`--ranking-loss-weight` and `--ranking-margin` but disabled in the main experiments.
+Weight decay defaults to `1e-4` and is not applied to biases or calibration
+parameters. Edge masking is likewise disabled by default (`--edge-mask-ratio 0`).
+When enabled, hidden positives and all training anomalies enter the balanced and
+ranking losses. A `ReduceLROnPlateau` scheduler halves the learning rate after eight
+epochs without validation-AUPRC improvement, down to `1e-6`.
+Early stopping selects the state with the best combined validation AUPRC and ignores
+improvements smaller than `1e-5`; these settings are configurable with
+`--scheduler-patience`, `--scheduler-factor`, `--min-learning-rate`, and
+`--min-delta`.
+
+The alternative `--score-normalization stable` mode computes dropout-free training
+statistics before every optimization step. Validation statistics remain based only
+on training examples in both normalization modes.
 
 
 ## License
