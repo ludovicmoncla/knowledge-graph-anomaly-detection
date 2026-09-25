@@ -10,7 +10,12 @@ import pandas as pd
 import torch
 
 from ..data import PreparedSnapshot, load_vocabulary
-from ..pipeline import aggregate_repeated_metrics, evaluate_snapshot, set_random_seed
+from ..pipeline import (
+    aggregate_repeated_metrics,
+    evaluate_snapshot,
+    load_completed_result,
+    set_random_seed,
+)
 from ..preparation import load_prepared_experiment
 from .lognet import LoGNet, build_line_graph_edges
 
@@ -25,10 +30,16 @@ class LogNetConfig:
     dropout: float = 0.3
     learning_rate: float = 1e-2
     weight_decay: float = 1e-3
-    epochs: int = 100
+    epochs: int = 300
     patience: int = 25
+    min_delta: float = 1e-5
     seed: int = 42
     device: str = "auto"
+    save_model: bool = True
+
+    def __post_init__(self) -> None:
+        if self.min_delta < 0.0:
+            raise ValueError("min_delta must be non-negative")
 
     def resolved_device(self) -> torch.device:
         if self.device != "auto":
@@ -78,7 +89,7 @@ def train_model(
                 prepared.graph, prepared.triples, prepared.labels, prepared.validation_mask
             )
         validation_losses.append(float(validation_loss))
-        if validation_losses[-1] < best_loss:
+        if validation_losses[-1] < best_loss - config.min_delta:
             best_loss = validation_losses[-1]
             best_weights = copy.deepcopy(model.state_dict())
             epochs_without_improvement = 0
@@ -124,8 +135,17 @@ def run(config: LogNetConfig) -> pd.DataFrame:
         prepared, len(entities.id_to_text), len(relations.id_to_text), config
     )
     metrics = evaluate_snapshot(
-        model, prepared, entities, relations, config.output_dir, train_losses, validation_losses
+        model,
+        prepared,
+        entities,
+        relations,
+        config.output_dir,
+        train_losses,
+        validation_losses,
+        save_model=config.save_model,
     )
+    elapsed = time.perf_counter() - started_at
+    metrics["elapsed_seconds"] = elapsed
     protocol = str(metadata["config"]["protocol"])
     result = pd.DataFrame([{"protocol": protocol, "status": "ok", **metrics}])
     result.to_csv(config.output_dir / "summary.csv", index=False)
@@ -133,22 +153,29 @@ def run(config: LogNetConfig) -> pd.DataFrame:
         f"Completed {protocol}: test AUROC={metrics['auc_test']:.4f}, "
         f"AUPRC={metrics['auprc_test']:.4f}, precision={metrics['precision_test']:.4f}, "
         f"recall={metrics['recall_test']:.4f}, F1={metrics['f1_test']:.4f} "
-        f"in {time.perf_counter() - started_at:.1f}s",
+        f"in {elapsed:.1f}s",
         flush=True,
     )
     return result
 
 
-def run_repeated(config: LogNetConfig, seeds: list[int]) -> dict[str, pd.DataFrame]:
+def run_repeated(
+    config: LogNetConfig, seeds: list[int], *, resume: bool = False
+) -> dict[str, pd.DataFrame]:
     unique_seeds = list(dict.fromkeys(seeds))
     if len(unique_seeds) < 2:
         raise ValueError("At least two distinct seeds are required")
     root_output = config.output_dir
+    root_output.mkdir(parents=True, exist_ok=True)
     results = []
     for seed in unique_seeds:
-        seed_result = run(
-            replace(config, seed=seed, output_dir=root_output / f"seed_{seed}")
-        ).copy()
+        seed_config = replace(config, seed=seed, output_dir=root_output / f"seed_{seed}")
+        seed_result = load_completed_result(seed_config) if resume else None
+        if seed_result is None:
+            seed_result = run(seed_config).copy()
+        else:
+            seed_result = seed_result.copy()
+            print(f"Resuming: completed LoGNet seed {seed} reused", flush=True)
         seed_result.insert(0, "seed", seed)
         results.append(seed_result)
     by_seed = pd.concat(results, ignore_index=True)

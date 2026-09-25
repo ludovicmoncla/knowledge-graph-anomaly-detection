@@ -39,6 +39,7 @@ class PreparationConfig:
     chronological_train_snapshots: int = 7
     chronological_validation_snapshots: int = 1
     max_anomaly_ratio: float | None = None
+    evaluation_anomaly_ratio: float | None = None
     train_anomaly_ratios: tuple[float, ...] = ()
     openrouter_model: str = "openai/gpt-4.1"
     env_file: Path = Path(".env")
@@ -94,11 +95,19 @@ def _validate_ratio_config(config: PreparationConfig) -> None:
     if config.genai_batch_size < 1:
         raise ValueError("genai_batch_size must be at least 1")
     if config.max_anomaly_ratio is None:
-        if config.train_anomaly_ratios:
-            raise ValueError("train_anomaly_ratios requires max_anomaly_ratio")
+        if config.train_anomaly_ratios or config.evaluation_anomaly_ratio is not None:
+            raise ValueError(
+                "train_anomaly_ratios and evaluation_anomaly_ratio require "
+                "max_anomaly_ratio"
+            )
         return
     if not 0.0 < config.max_anomaly_ratio <= 0.20:
         raise ValueError("max_anomaly_ratio must be greater than 0 and at most 0.20")
+    if (
+        config.evaluation_anomaly_ratio is not None
+        and not 0.0 < config.evaluation_anomaly_ratio <= 0.20
+    ):
+        raise ValueError("evaluation_anomaly_ratio must be greater than 0 and at most 0.20")
     if not config.train_anomaly_ratios:
         return
     if len(set(config.train_anomaly_ratios)) != len(config.train_anomaly_ratios):
@@ -284,13 +293,24 @@ def _load_negatives(
     return negatives.reset_index(drop=True)
 
 
-def _ratio_negative_counts(positives: pd.DataFrame, ratio: float) -> dict[str, int]:
+def _ratio_negative_counts(
+    positives: pd.DataFrame,
+    ratio: float,
+    evaluation_ratio: float | None = None,
+) -> dict[str, int]:
     counts = positives["split"].value_counts()
-    result = {split: _anomaly_count(int(counts.get(split, 0)), ratio) for split in SPLITS}
+    ratios = {split: ratio for split in SPLITS}
+    if evaluation_ratio is not None:
+        ratios["validation"] = evaluation_ratio
+        ratios["test"] = evaluation_ratio
+    result = {
+        split: _anomaly_count(int(counts.get(split, 0)), ratios[split])
+        for split in SPLITS
+    }
     if any(count < 1 for count in result.values()):
         raise ValueError(
             "The selected snapshots contain too few positives to put an anomaly in every split "
-            f"at ratio {ratio:g}"
+            "at the requested ratios"
         )
     return result
 
@@ -386,6 +406,16 @@ def _write_prepared_experiment(
         "timestamps": timestamps,
         "snapshot_count": len(timestamps),
         "train_anomaly_ratio": train_anomaly_ratio,
+        "validation_anomaly_ratio": (
+            config.evaluation_anomaly_ratio
+            if config.evaluation_anomaly_ratio is not None
+            else config.max_anomaly_ratio
+        ),
+        "test_anomaly_ratio": (
+            config.evaluation_anomaly_ratio
+            if config.evaluation_anomaly_ratio is not None
+            else config.max_anomaly_ratio
+        ),
         "counts": {
             split: {
                 "positive": int(((manifest["split"] == split) & (manifest["label"] == 1)).sum()),
@@ -445,7 +475,11 @@ def prepare_experiment(config: PreparationConfig) -> pd.DataFrame:
     else:
         raise ValueError(f"Unknown protocol: {config.protocol}")
     if config.max_anomaly_ratio is not None:
-        target_by_split = _ratio_negative_counts(positives, config.max_anomaly_ratio)
+        target_by_split = _ratio_negative_counts(
+            positives,
+            config.max_anomaly_ratio,
+            config.evaluation_anomaly_ratio,
+        )
         requested_counts = _requested_counts_by_snapshot(
             positives, target_by_split, len(snapshots), config.protocol
         )
@@ -554,6 +588,9 @@ def load_prepared_experiment(
     graph = Data(
         edge_index=torch.as_tensor(graph_triples[:, [0, 2]].T, dtype=torch.long),
         edge_attr=torch.as_tensor(graph_triples[:, 1], dtype=torch.long),
+        edge_example_index=torch.as_tensor(
+            np.flatnonzero(graph_mask.to_numpy()), dtype=torch.long
+        ),
         num_nodes=num_entities,
     ).to(device)
     prepared = PreparedSnapshot(

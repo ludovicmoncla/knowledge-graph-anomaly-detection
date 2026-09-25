@@ -71,7 +71,7 @@ def save_loss_plot(train_losses: list[float], validation_losses: list[float], pa
     figure, axis = plt.subplots(figsize=(9, 5))
     axis.plot(train_losses, label="Train")
     axis.plot(validation_losses, label="Validation", linestyle="--")
-    axis.set(xlabel="Epoch", ylabel="BCE loss", title="Training history")
+    axis.set(xlabel="Epoch", ylabel="Loss", title="Training history")
     axis.grid(linestyle="--", alpha=0.5)
     axis.legend()
     figure.tight_layout()

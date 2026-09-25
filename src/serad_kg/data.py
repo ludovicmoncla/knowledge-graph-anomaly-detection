@@ -81,6 +81,7 @@ def prepare_snapshot(
     graph = Data(
         edge_index=torch.as_tensor(graph_triples[:, [0, 2]].T, dtype=torch.long),
         edge_attr=torch.as_tensor(graph_triples[:, 1], dtype=torch.long),
+        edge_example_index=torch.as_tensor(positive_train, dtype=torch.long),
         num_nodes=num_entities,
     )
     triples_numpy = np.concatenate([positive_triples, negative_triples]).astype(np.int64)

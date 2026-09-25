@@ -66,6 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
             "for example: 0.01 0.025 0.05 0.10"
         ),
     )
+    parser.add_argument(
+        "--evaluation-anomaly-ratio",
+        "--test-anomaly-ratio",
+        dest="evaluation_anomaly_ratio",
+        type=float,
+        help=(
+            "Use the same validation/test contamination ratio, independently of "
+            "--max-anomaly-ratio"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--chronological-train-snapshots", type=int, default=7)
     parser.add_argument("--chronological-validation-snapshots", type=int, default=1)
@@ -86,6 +96,7 @@ def main() -> None:
         chronological_train_snapshots=args.chronological_train_snapshots,
         chronological_validation_snapshots=args.chronological_validation_snapshots,
         max_anomaly_ratio=args.max_anomaly_ratio,
+        evaluation_anomaly_ratio=args.evaluation_anomaly_ratio,
         train_anomaly_ratios=tuple(args.train_anomaly_ratios),
         openrouter_model=args.openrouter_model,
         env_file=args.env_file,
